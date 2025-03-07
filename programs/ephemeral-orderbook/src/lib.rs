@@ -1,13 +1,14 @@
 use anchor_lang::prelude::*;
-use ephemeral_rollups_sdk::{
-    anchor::{commit, delegate, ephemeral},
-    cpi::DelegateConfig,
-    ephem::{commit_accounts, commit_and_undelegate_accounts},
-};
+use ephemeral_rollups_sdk::anchor::ephemeral;
+
+mod constants;
+mod errors;
+mod instructions;
+mod state;
+
+use instructions::*;
 
 declare_id!("21hURyc3yhE9StGsuvShDa4j1cbDPoTf7LMP45LX2vdV");
-
-pub const TEST_PDA_SEED: &[u8] = b"test-pda";
 
 #[ephemeral]
 #[program]
@@ -15,109 +16,99 @@ pub mod ephemeral_orderbook {
     use super::*;
 
     /// Initialize the orderbook.
-    pub fn initialize(ctx: Context<Initialize>) -> Result<()> {
-        let counter = &mut ctx.accounts.counter;
-        counter.count = 0;
-        Ok(())
+    pub fn initialize_orderbook(
+        ctx: Context<InitializeOrderbook>,
+        args: InitializeOrderbookArgs,
+    ) -> Result<()> {
+        InitializeOrderbook::handler(ctx, args)
     }
 
-    /// Increment the orderbook.
-    pub fn increment(ctx: Context<Increment>) -> Result<()> {
-        let counter = &mut ctx.accounts.counter;
-        counter.count += 1;
-        if counter.count > 1000 {
-            counter.count = 0;
-        }
-        Ok(())
+    /// Create an order in the orderbook.
+    pub fn create_order(ctx: Context<CreateOrder>, args: CreateOrderArgs) -> Result<()> {
+        CreateOrder::handler(ctx, args)
+    }
+
+    /// Create a user of the orderbook.
+    pub fn create_user(ctx: Context<CreateUser>) -> Result<()> {
+        CreateUser::handler(ctx)
+    }
+
+    /// Deposit tokens into the users balances.
+    pub fn deposit_tokens(
+        ctx: Context<ChangeUserBalances>,
+        args: ChangeUserBalancesArgs,
+    ) -> Result<()> {
+        ChangeUserBalances::handler(ctx, true, args)
+    }
+
+    /// Deposit tokens into the users balances.
+    pub fn withdraw_tokens(
+        ctx: Context<ChangeUserBalances>,
+        args: ChangeUserBalancesArgs,
+    ) -> Result<()> {
+        ChangeUserBalances::handler(ctx, false, args)
+    }
+
+    /// Match a buy and a sell order.
+    pub fn match_order(ctx: Context<MatchOrder>, args: MatchOrderArgs) -> Result<()> {
+        MatchOrder::handler(ctx, args)
     }
 
     /// Delegate the account to the delegation program
-    pub fn delegate(ctx: Context<DelegateInput>) -> Result<()> {
-        ctx.accounts.delegate_pda(
-            &ctx.accounts.payer,
-            &[TEST_PDA_SEED],
-            DelegateConfig::default(),
-        )?;
-
-        Ok(())
+    pub fn delegate_orderbook(
+        ctx: Context<DelegateOrderbook>,
+        args: DelegateOrderbookArgs,
+    ) -> Result<()> {
+        DelegateOrderbook::handler(ctx, args)
     }
 
     /// Undelegate the account from the delegation program
-    pub fn undelegate(ctx: Context<IncrementAndCommit>) -> Result<()> {
-        commit_and_undelegate_accounts(
-            &ctx.accounts.payer,
-            vec![&ctx.accounts.counter.to_account_info()],
-            &ctx.accounts.magic_context,
-            &ctx.accounts.magic_program,
-        )?;
-        Ok(())
+    pub fn undelegate_orderbook(ctx: Context<UndelegateOrderbook>) -> Result<()> {
+        UndelegateOrderbook::handler(ctx)
     }
 
-    /// Increment the counter + manual commit the account in the ER.
-    pub fn increment_and_commit(ctx: Context<IncrementAndCommit>) -> Result<()> {
-        let counter = &mut ctx.accounts.counter;
-        counter.count += 1;
-        commit_accounts(
-            &ctx.accounts.payer,
-            vec![&ctx.accounts.counter.to_account_info()],
-            &ctx.accounts.magic_context,
-            &ctx.accounts.magic_program,
-        )?;
-        Ok(())
-    }
+    // /// Increment the counter + manual commit the account in the ER.
+    // pub fn increment_and_commit(ctx: Context<IncrementAndCommit>) -> Result<()> {
+    //     let counter = &mut ctx.accounts.counter;
+    //     counter.count += 1;
+    //     commit_accounts(
+    //         &ctx.accounts.payer,
+    //         vec![&ctx.accounts.counter.to_account_info()],
+    //         &ctx.accounts.magic_context,
+    //         &ctx.accounts.magic_program,
+    //     )?;
+    //     Ok(())
+    // }
 
-    /// Increment the counter + manual commit the account in the ER.
-    pub fn increment_and_undelegate(ctx: Context<IncrementAndCommit>) -> Result<()> {
-        let counter = &mut ctx.accounts.counter;
-        counter.count += 1;
-        // Serialize the Anchor counter account, commit and undelegate
-        counter.exit(&crate::ID)?;
-        commit_and_undelegate_accounts(
-            &ctx.accounts.payer,
-            vec![&ctx.accounts.counter.to_account_info()],
-            &ctx.accounts.magic_context,
-            &ctx.accounts.magic_program,
-        )?;
-        Ok(())
-    }
+    // /// Increment the counter + manual commit the account in the ER.
+    // pub fn increment_and_undelegate(ctx: Context<IncrementAndCommit>) -> Result<()> {
+    //     let counter = &mut ctx.accounts.counter;
+    //     counter.count += 1;
+    //     // Serialize the Anchor counter account, commit and undelegate
+    //     counter.exit(&crate::ID)?;
+    //     commit_and_undelegate_accounts(
+    //         &ctx.accounts.payer,
+    //         vec![&ctx.accounts.counter.to_account_info()],
+    //         &ctx.accounts.magic_context,
+    //         &ctx.accounts.magic_program,
+    //     )?;
+    //     Ok(())
+    // }
 }
 
-#[derive(Accounts)]
-pub struct Initialize<'info> {
-    #[account(init, payer = user, space = 8 + 8, seeds = [TEST_PDA_SEED], bump)]
-    pub counter: Account<'info, Counter>,
-    #[account(mut)]
-    pub user: Signer<'info>,
-    pub system_program: Program<'info, System>,
-}
+// /// Account for the increment instruction.
+// #[derive(Accounts)]
+// pub struct Increment<'info> {
+//     #[account(mut, seeds = [TEST_PDA_SEED], bump)]
+//     pub counter: Account<'info, Counter>,
+// }
 
-#[delegate]
-#[derive(Accounts)]
-pub struct DelegateInput<'info> {
-    pub payer: Signer<'info>,
-    /// CHECK The pda to delegate
-    #[account(mut, del)]
-    pub pda: AccountInfo<'info>,
-}
-
-/// Account for the increment instruction.
-#[derive(Accounts)]
-pub struct Increment<'info> {
-    #[account(mut, seeds = [TEST_PDA_SEED], bump)]
-    pub counter: Account<'info, Counter>,
-}
-
-/// Account for the increment instruction + manual commit.
-#[commit]
-#[derive(Accounts)]
-pub struct IncrementAndCommit<'info> {
-    #[account(mut)]
-    pub payer: Signer<'info>,
-    #[account(mut, seeds = [TEST_PDA_SEED], bump)]
-    pub counter: Account<'info, Counter>,
-}
-
-#[account]
-pub struct Counter {
-    pub count: u64,
-}
+// /// Account for the increment instruction + manual commit.
+// #[commit]
+// #[derive(Accounts)]
+// pub struct IncrementAndCommit<'info> {
+//     #[account(mut)]
+//     pub payer: Signer<'info>,
+//     #[account(mut, seeds = [TEST_PDA_SEED], bump)]
+//     pub counter: Account<'info, Counter>,
+// }
