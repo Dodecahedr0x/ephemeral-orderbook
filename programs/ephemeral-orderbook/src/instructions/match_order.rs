@@ -39,16 +39,12 @@ pub struct MatchOrderArgs {
 pub struct MatchOrder<'info> {
     #[account(
         mut,
-        realloc = Orderbook::space(orderbook.orders.len() + 1, orderbook.user_balances.len()),
-        realloc::payer = user,
-        realloc::zero = true,
         seeds = [ORDERBOOK_PDA_SEED, orderbook.id.as_ref()],
         bump = orderbook.bump,
     )]
     pub orderbook: Account<'info, Orderbook>,
     #[account(mut)]
     pub user: Signer<'info>,
-    pub system_program: Program<'info, System>,
 }
 
 impl<'info> MatchOrder<'info> {
@@ -59,13 +55,17 @@ impl<'info> MatchOrder<'info> {
         if maker_order.order_type != OrderType::Sell {
             return err!(OrderbookError::InvalidOrderType);
         }
+        if maker_order.owner != args.maker {
+            return err!(OrderbookError::InvalidOrderOwner);
+        }
         let taker_order = orderbook.orders[args.taker_index as usize].clone();
         if taker_order.order_type != OrderType::Buy {
             return err!(OrderbookError::InvalidOrderType);
         }
+        if taker_order.owner != args.taker {
+            return err!(OrderbookError::InvalidOrderOwner);
+        }
 
-        // The orders matched!
-        // Assuming matching orders always have the same size
         if maker_order.price > args.oracle_data.temporal_numeric_value.quantized_value
             || taker_order.price < args.oracle_data.temporal_numeric_value.quantized_value
             || maker_order.quantity != taker_order.quantity
@@ -73,17 +73,17 @@ impl<'info> MatchOrder<'info> {
             return err!(OrderbookError::MismatchingOrders);
         }
 
+        // The orders matched!
+        // Assuming matching orders always have the same size
         let Some(maker) = orderbook.user_balances_mut(&args.maker) else {
             return err!(OrderbookError::UnknownUser);
         };
-        maker.base_balance -= maker_order.quantity;
         maker.quote_balance += maker_order.price;
 
         let Some(taker) = orderbook.user_balances_mut(&args.taker) else {
             return err!(OrderbookError::UnknownUser);
         };
         taker.base_balance += maker_order.quantity;
-        taker.quote_balance -= maker_order.price;
 
         orderbook.orders[args.taker_index as usize].match_timestamp =
             Some(args.oracle_data.temporal_numeric_value.timestamp_ns);

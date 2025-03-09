@@ -1,15 +1,13 @@
 use anchor_lang::prelude::*;
 
-#[derive(AnchorSerialize, AnchorDeserialize, Clone, PartialEq)]
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug, PartialEq)]
 pub enum OrderType {
     Buy,
     Sell,
 }
 
-#[derive(AnchorSerialize, AnchorDeserialize, Clone)]
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug)]
 pub struct Order {
-    pub id: Pubkey,
-    pub orderbook: Pubkey,
     pub owner: Pubkey,
     pub match_timestamp: Option<i64>,
     pub order_type: OrderType,
@@ -18,10 +16,10 @@ pub struct Order {
 }
 
 impl Order {
-    pub const SPACE: usize = 8 + 32 + 32 + 1 + 32 + 8 + 8;
+    pub const SPACE: usize = 8 + 32 + 9 + 1 + 8 + 8;
 }
 
-#[derive(AnchorSerialize, AnchorDeserialize, Clone)]
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug)]
 pub struct UserBalances {
     pub user: Pubkey,
     pub base_balance: u64,

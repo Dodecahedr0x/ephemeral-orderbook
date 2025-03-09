@@ -22,7 +22,10 @@ pub struct CreateOrder<'info> {
         bump = orderbook.bump,
     )]
     pub orderbook: Account<'info, Orderbook>,
-    #[account(mut)]
+    #[account(
+        mut,
+        constraint = user.key() == args.order.owner @ OrderbookError::InvalidOrderOwner
+    )]
     pub user: Signer<'info>,
     pub system_program: Program<'info, System>,
 }
@@ -43,16 +46,24 @@ impl<'info> CreateOrder<'info> {
         };
 
         // Remove assets from user balances
-        if order.order_type == OrderType::Buy
-            && user_balances.quote_balance < order.price * order.quantity
-        {
-            return err!(OrderbookError::NotEnoughQuoteTokens);
-        } else {
+        msg!("{:?}", user_balances);
+        msg!("{:?}", order);
+        if order.order_type == OrderType::Buy {
+            require_gte!(
+                user_balances.quote_balance,
+                order.price * order.quantity,
+                OrderbookError::NotEnoughQuoteTokens
+            );
+
             user_balances.quote_balance -= order.price * order.quantity;
         }
-        if order.order_type == OrderType::Sell && user_balances.base_balance < order.quantity {
-            return err!(OrderbookError::NotEnoughBaseTokens);
-        } else {
+        if order.order_type == OrderType::Sell {
+            require_gte!(
+                user_balances.base_balance,
+                order.quantity,
+                OrderbookError::NotEnoughBaseTokens
+            );
+
             user_balances.base_balance -= order.quantity;
         }
 
