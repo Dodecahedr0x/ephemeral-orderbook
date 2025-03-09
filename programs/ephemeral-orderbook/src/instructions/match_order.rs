@@ -78,12 +78,12 @@ impl<'info> MatchOrder<'info> {
         let Some(maker) = orderbook.user_balances_mut(&args.maker) else {
             return err!(OrderbookError::UnknownUser);
         };
-        maker.quote_balance += maker_order.price;
+        maker.quote_balance += maker_order.price * maker_order.quantity;
 
         let Some(taker) = orderbook.user_balances_mut(&args.taker) else {
             return err!(OrderbookError::UnknownUser);
         };
-        taker.base_balance += maker_order.quantity;
+        taker.base_balance += taker_order.quantity;
 
         orderbook.orders[args.taker_index as usize].match_timestamp =
             Some(args.oracle_data.temporal_numeric_value.timestamp_ns);

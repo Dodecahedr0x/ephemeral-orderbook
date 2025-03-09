@@ -5,19 +5,16 @@ import {
   DELEGATION_PROGRAM_ID,
   GetCommitmentSignature,
 } from "@magicblock-labs/ephemeral-rollups-sdk";
-import token, {
+import {
   ASSOCIATED_TOKEN_PROGRAM_ID,
-  createAssociatedTokenAccount,
   createAssociatedTokenAccountIdempotent,
   createMint,
-  getAssociatedTokenAddressSync,
   mintToChecked,
   TOKEN_PROGRAM_ID,
 } from "@solana/spl-token";
 import takerKpBytes from "./taker.json";
 import * as dotenv from "dotenv";
 import { assert } from "chai";
-import NodeWallet from "@coral-xyz/anchor/dist/cjs/nodewallet";
 dotenv.config();
 
 const ORDERBOOK_PDA_SEED = "orderbook:"; // 5RgeA5P8bRaynJovch3zQURfJxXL3QK2JYg1YamSvyLb
@@ -362,43 +359,54 @@ describe("ephemeral-orderbook", () => {
     assert.equal(orderbookAccount.orders.length, 0);
   });
 
-  // it("Undelegate the orderbook and withdraw tokens", async () => {
-  //   let tx = await program.methods
-  //     .incrementAndUndelegate()
-  //     .accounts({
-  //       payer: providerEphemeralRollup.wallet.publicKey,
-  //       // @ts-ignore
-  //       counter: pda,
-  //     })
-  //     .transaction();
-  //   tx.feePayer = provider.wallet.publicKey;
-  //   tx.recentBlockhash = (
-  //     await providerEphemeralRollup.connection.getLatestBlockhash()
-  //   ).blockhash;
-  //   tx = await providerEphemeralRollup.wallet.signTransaction(tx);
+  it("Undelegate the orderbook and withdraw tokens", async () => {
+    let tx = await program.methods
+      .undelegateOrderbook()
+      .accountsPartial({
+        payer: providerEphemeralRollup.wallet.publicKey,
+        orderbook: orderbookPda,
+      })
+      .transaction();
+    tx.feePayer = provider.wallet.publicKey;
+    tx.recentBlockhash = (
+      await providerEphemeralRollup.connection.getLatestBlockhash()
+    ).blockhash;
+    tx = await providerEphemeralRollup.wallet.signTransaction(tx);
 
-  //   const txSign = await providerEphemeralRollup.sendAndConfirm(tx);
-  //   console.log("Increment Tx and Commit: ", txSign);
+    const txSign = await providerEphemeralRollup.sendAndConfirm(tx);
 
-  //   const counterAccount = await ephemeralProgram.account.counter.fetch(pda);
-  //   console.log("Counter: ", counterAccount.count.toString());
+    // Await for the commitment on the base layer
+    await GetCommitmentSignature(txSign, providerEphemeralRollup.connection);
+  });
 
-  //   // Await for the commitment on the base layer
-  //   const txCommitSgn = await GetCommitmentSignature(
-  //     txSign,
-  //     providerEphemeralRollup.connection
-  //   );
-  //   console.log("Account commit signature:", txCommitSgn);
-  //   const latestBlockhash = await provider.connection.getLatestBlockhash();
-  //   await provider.connection.confirmTransaction(
-  //     {
-  //       signature: txCommitSgn,
-  //       ...latestBlockhash,
-  //     },
-  //     "confirmed"
-  //   );
-
-  //   const counterAccount = await program.account.counter.fetch(pda);
-  //   console.log("Counter: ", counterAccount.count.toString());
-  // });
+  it("Withdraw tokens on the base layer", async () => {
+    console.log(await program.account.orderbook.fetch(orderbookPda));
+    await program.methods
+      .withdraw({ amount: quantity })
+      .accountsPartial({
+        user: provider.wallet.publicKey,
+        orderbook: orderbookPda,
+        mint: quoteMint,
+        userTokenAccount: makerQuoteAta,
+        orderbookTokenAccount: orderbookQuoteAta,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+    await program.methods
+      .withdraw({ amount: quantity })
+      .accountsPartial({
+        user: takerKp.publicKey,
+        orderbook: orderbookPda,
+        mint: baseMint,
+        userTokenAccount: takerBaseAta,
+        orderbookTokenAccount: orderbookBaseAta,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .signers([takerKp])
+      .rpc();
+  });
 });
