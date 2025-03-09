@@ -16,4 +16,8 @@ pub enum OrderbookError {
     InvalidOrderType,
     #[msg("Mismatching orders")]
     MismatchingOrders,
+    #[msg("Invalid mint")]
+    InvalidMint,
+    #[msg("Invalid order owner")]
+    InvalidOrderOwner,
 }

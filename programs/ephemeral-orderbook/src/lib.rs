@@ -34,18 +34,14 @@ pub mod ephemeral_orderbook {
     }
 
     /// Deposit tokens into the users balances.
-    pub fn deposit_tokens(
-        ctx: Context<ChangeUserBalances>,
-        args: ChangeUserBalancesArgs,
-    ) -> Result<()> {
+    #[access_control(ctx.accounts.validate())]
+    pub fn deposit(ctx: Context<ChangeUserBalances>, args: ChangeUserBalancesArgs) -> Result<()> {
         ChangeUserBalances::handler(ctx, true, args)
     }
 
     /// Deposit tokens into the users balances.
-    pub fn withdraw_tokens(
-        ctx: Context<ChangeUserBalances>,
-        args: ChangeUserBalancesArgs,
-    ) -> Result<()> {
+    #[access_control(ctx.accounts.validate())]
+    pub fn withdraw(ctx: Context<ChangeUserBalances>, args: ChangeUserBalancesArgs) -> Result<()> {
         ChangeUserBalances::handler(ctx, false, args)
     }
 
