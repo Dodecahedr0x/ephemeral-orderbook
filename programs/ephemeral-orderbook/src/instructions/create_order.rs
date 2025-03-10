@@ -1,7 +1,7 @@
 use crate::{
-    constants::ORDERBOOK_PDA_SEED,
+    constants::{ORDERBOOK_PDA_SEED, TRADER_PDA_SEED},
     errors::OrderbookError,
-    state::{Order, OrderType, Orderbook},
+    state::{Order, OrderType, Orderbook, Trader},
 };
 use anchor_lang::prelude::*;
 
@@ -13,20 +13,24 @@ pub struct CreateOrderArgs {
 #[derive(Accounts)]
 #[instruction(args: CreateOrderArgs)]
 pub struct CreateOrder<'info> {
+    #[account(mut)]
+    pub user: Signer<'info>,
     #[account(
-        mut,
-        realloc = Orderbook::space(orderbook.orders.len() + 1, orderbook.user_balances.len()),
-        realloc::payer = user,
-        realloc::zero = true,
         seeds = [ORDERBOOK_PDA_SEED, orderbook.id.as_ref()],
         bump = orderbook.bump,
     )]
     pub orderbook: Account<'info, Orderbook>,
     #[account(
         mut,
-        constraint = user.key() == args.order.owner @ OrderbookError::InvalidOrderOwner
+        realloc = Trader::space(trader.orders.len() + 1),
+        realloc::payer = user,
+        realloc::zero = true,
+        seeds = [TRADER_PDA_SEED, orderbook.key().as_ref(), user.key().as_ref()],
+        bump = trader.bump,
+        has_one = orderbook,
+        has_one = user,
     )]
-    pub user: Signer<'info>,
+    pub trader: Box<Account<'info, Trader>>,
     pub system_program: Program<'info, System>,
 }
 
@@ -37,39 +41,30 @@ impl<'info> CreateOrder<'info> {
             return err!(OrderbookError::AlreadyMatched);
         }
 
-        let Some(user_balances) = ctx
-            .accounts
-            .orderbook
-            .user_balances_mut(ctx.accounts.user.key)
-        else {
-            return err!(OrderbookError::UnknownUser);
-        };
+        let trader = &mut ctx.accounts.trader;
 
         // Remove assets from user balances
-        msg!("{:?}", user_balances);
-        msg!("{:?}", order);
         if order.order_type == OrderType::Buy {
             require_gte!(
-                user_balances.quote_balance,
+                trader.quote_balance,
                 order.price * order.quantity,
                 OrderbookError::NotEnoughQuoteTokens
             );
 
-            user_balances.quote_balance -= order.price * order.quantity;
+            trader.quote_balance -= order.price * order.quantity;
         }
         if order.order_type == OrderType::Sell {
             require_gte!(
-                user_balances.base_balance,
+                trader.base_balance,
                 order.quantity,
                 OrderbookError::NotEnoughBaseTokens
             );
 
-            user_balances.base_balance -= order.quantity;
+            trader.base_balance -= order.quantity;
         }
 
-        let orderbook = &mut ctx.accounts.orderbook;
-        orderbook.orders.push(args.order);
-        orderbook.orders.shrink_to_fit();
+        trader.orders.push(args.order);
+        trader.orders.shrink_to_fit();
 
         Ok(())
     }

@@ -14,7 +14,7 @@ pub struct InitializeOrderbook<'info> {
     #[account(
         init,
         payer = user,
-        space = Orderbook::space(0, 0),
+        space = Orderbook::SPACE,
         seeds = [ORDERBOOK_PDA_SEED, args.id.as_ref()],
         bump,
     )]

@@ -17,7 +17,8 @@ import * as dotenv from "dotenv";
 import { assert } from "chai";
 dotenv.config();
 
-const ORDERBOOK_PDA_SEED = "orderbook:"; // 5RgeA5P8bRaynJovch3zQURfJxXL3QK2JYg1YamSvyLb
+const ORDERBOOK_PDA_SEED = "orderbook:";
+const TRADER_PDA_SEED = "trader:";
 
 describe("ephemeral-orderbook", () => {
   // Configure the client to use the local cluster.
@@ -37,15 +38,31 @@ describe("ephemeral-orderbook", () => {
   const program = anchor.workspace
     .EphemeralOrderbook as Program<EphemeralOrderbook>;
   const ephemeralProgram = new Program(program.idl, providerEphemeralRollup);
+  const takerKp = anchor.web3.Keypair.fromSecretKey(
+    Uint8Array.from(takerKpBytes)
+  );
   const orderbookId = anchor.web3.Keypair.generate().publicKey;
   const [orderbookPda] = anchor.web3.PublicKey.findProgramAddressSync(
     [Buffer.from(ORDERBOOK_PDA_SEED), orderbookId.toBuffer()],
     program.programId
   );
-  const quantity = new anchor.BN(10000000);
-  const takerKp = anchor.web3.Keypair.fromSecretKey(
-    Uint8Array.from(takerKpBytes)
+  const [makerPda] = anchor.web3.PublicKey.findProgramAddressSync(
+    [
+      Buffer.from(TRADER_PDA_SEED),
+      orderbookPda.toBuffer(),
+      provider.wallet.publicKey.toBuffer(),
+    ],
+    program.programId
   );
+  const [takerPda] = anchor.web3.PublicKey.findProgramAddressSync(
+    [
+      Buffer.from(TRADER_PDA_SEED),
+      orderbookPda.toBuffer(),
+      takerKp.publicKey.toBuffer(),
+    ],
+    program.programId
+  );
+  const quantity = new anchor.BN(10000000);
   let baseMint: anchor.web3.PublicKey;
   let quoteMint: anchor.web3.PublicKey;
   let makerBaseAta: anchor.web3.PublicKey;
@@ -156,37 +173,43 @@ describe("ephemeral-orderbook", () => {
     assert.equal(orderbookAccount.id.toBase58(), orderbookId.toBase58());
     assert.equal(orderbookAccount.baseMint.toBase58(), baseMint.toBase58());
     assert.equal(orderbookAccount.quoteMint.toBase58(), quoteMint.toBase58());
-    assert.equal(orderbookAccount.userBalances.length, 0);
-    assert.equal(orderbookAccount.orders.length, 0);
   });
 
-  it("Create users", async () => {
+  it("Create traders", async () => {
     await program.methods
-      .createUser()
-      .accountsPartial({ orderbook: orderbookPda })
+      .createTrader()
+      .accountsPartial({
+        orderbook: orderbookPda,
+        trader: makerPda,
+        user: provider.wallet.publicKey,
+      })
       .rpc();
     await program.methods
-      .createUser()
-      .accountsPartial({ orderbook: orderbookPda, user: takerKp.publicKey })
+      .createTrader()
+      .accountsPartial({
+        orderbook: orderbookPda,
+        trader: takerPda,
+        user: takerKp.publicKey,
+      })
       .signers([takerKp])
       .rpc();
 
-    const orderbookAccount = await program.account.orderbook.fetch(
-      orderbookPda
-    );
-    assert.equal(orderbookAccount.id.toBase58(), orderbookId.toBase58());
-    assert.equal(orderbookAccount.baseMint.toBase58(), baseMint.toBase58());
-    assert.equal(orderbookAccount.quoteMint.toBase58(), quoteMint.toBase58());
-    assert.equal(orderbookAccount.orders.length, 0);
-    assert.equal(orderbookAccount.userBalances.length, 2);
+    const makerAccount = await program.account.trader.fetch(makerPda);
     assert.equal(
-      orderbookAccount.userBalances[0].user.toBase58(),
+      makerAccount.user.toBase58(),
       provider.wallet.publicKey.toBase58()
     );
-    assert.equal(
-      orderbookAccount.userBalances[1].user.toBase58(),
-      takerKp.publicKey.toBase58()
-    );
+    assert.equal(makerAccount.orderbook.toBase58(), orderbookPda.toBase58());
+    assert.equal(makerAccount.orders.length, 0);
+    assert.equal(makerAccount.baseBalance.toString(), "0");
+    assert.equal(makerAccount.quoteBalance.toString(), "0");
+
+    const takerAccount = await program.account.trader.fetch(takerPda);
+    assert.equal(takerAccount.user.toBase58(), takerKp.publicKey.toBase58());
+    assert.equal(takerAccount.orderbook.toBase58(), orderbookPda.toBase58());
+    assert.equal(takerAccount.orders.length, 0);
+    assert.equal(takerAccount.baseBalance.toString(), "0");
+    assert.equal(takerAccount.quoteBalance.toString(), "0");
   });
 
   it("Deposit tokens", async () => {
@@ -194,6 +217,7 @@ describe("ephemeral-orderbook", () => {
       .deposit({ amount: quantity })
       .accountsPartial({
         orderbook: orderbookPda,
+        trader: makerPda,
         mint: baseMint,
         userTokenAccount: makerBaseAta,
         orderbookTokenAccount: orderbookBaseAta,
@@ -207,6 +231,7 @@ describe("ephemeral-orderbook", () => {
       .accountsPartial({
         user: takerKp.publicKey,
         orderbook: orderbookPda,
+        trader: takerPda,
         mint: quoteMint,
         userTokenAccount: takerQuoteAta,
         orderbookTokenAccount: orderbookQuoteAta,
@@ -217,48 +242,69 @@ describe("ephemeral-orderbook", () => {
       .signers([takerKp, anchor.Wallet.local().payer])
       .rpc();
 
-    const orderbookAccount = await program.account.orderbook.fetch(
-      orderbookPda
-    );
-    assert.equal(
-      orderbookAccount.userBalances[0].baseBalance.toString(),
-      quantity.toString()
-    );
-    assert.equal(orderbookAccount.userBalances[0].quoteBalance.toString(), "0");
-    assert.equal(orderbookAccount.userBalances[1].baseBalance.toString(), "0");
-    assert.equal(
-      orderbookAccount.userBalances[1].quoteBalance.toString(),
-      quantity.toString()
-    );
+    const makerAccount = await program.account.trader.fetch(makerPda);
+    assert.equal(makerAccount.orders.length, 0);
+    assert.equal(makerAccount.baseBalance.toString(), quantity.toString());
+    assert.equal(makerAccount.quoteBalance.toString(), "0");
+
+    const takerAccount = await program.account.trader.fetch(takerPda);
+    assert.equal(takerAccount.orders.length, 0);
+    assert.equal(takerAccount.baseBalance.toString(), "0");
+    assert.equal(takerAccount.quoteBalance.toString(), quantity.toString());
   });
 
-  it("Delegate the orderbook", async () => {
-    let tx = await program.methods
-      .delegateOrderbook({ id: orderbookId })
+  it("Delegate traders", async () => {
+    let makerTx = await program.methods
+      .delegateTrader({ orderbook: orderbookPda })
       .accountsPartial({
         payer: provider.wallet.publicKey,
-        pda: orderbookPda,
+        pda: makerPda,
       })
       .transaction();
-    tx.feePayer = provider.wallet.publicKey;
-    tx.recentBlockhash = (
+    makerTx.feePayer = provider.wallet.publicKey;
+    makerTx.recentBlockhash = (
       await provider.connection.getLatestBlockhash()
     ).blockhash;
-    tx = await providerEphemeralRollup.wallet.signTransaction(tx);
-    await provider.sendAndConfirm(tx, [], {
+    makerTx = await providerEphemeralRollup.wallet.signTransaction(makerTx);
+    await provider.sendAndConfirm(makerTx, [], {
       skipPreflight: true,
       commitment: "confirmed",
     });
 
-    const account = await provider.connection.getAccountInfo(orderbookPda);
-    assert.equal(account.owner.toBase58(), DELEGATION_PROGRAM_ID.toBase58());
+    let takerTx = await program.methods
+      .delegateTrader({ orderbook: orderbookPda })
+      .accountsPartial({
+        payer: takerKp.publicKey,
+        pda: takerPda,
+      })
+      .signers([takerKp])
+      .transaction();
+    takerTx.feePayer = takerKp.publicKey;
+    takerTx.recentBlockhash = (
+      await provider.connection.getLatestBlockhash()
+    ).blockhash;
+    takerTx = await new anchor.Wallet(takerKp).signTransaction(takerTx);
+    const sig = await provider.connection.sendRawTransaction(
+      takerTx.serialize()
+    );
+    await provider.connection.confirmTransaction(sig);
+
+    const makerAccount = await provider.connection.getAccountInfo(makerPda);
+    assert.equal(
+      makerAccount.owner.toBase58(),
+      DELEGATION_PROGRAM_ID.toBase58()
+    );
+    const takerAccount = await provider.connection.getAccountInfo(takerPda);
+    assert.equal(
+      takerAccount.owner.toBase58(),
+      DELEGATION_PROGRAM_ID.toBase58()
+    );
   });
 
   it("Create orders", async () => {
     let makerTx = await program.methods
       .createOrder({
         order: {
-          owner: provider.wallet.publicKey,
           matchTimestamp: null,
           orderType: { sell: {} },
           price: new anchor.BN(1),
@@ -268,12 +314,12 @@ describe("ephemeral-orderbook", () => {
       .accountsPartial({
         user: provider.wallet.publicKey,
         orderbook: orderbookPda,
+        trader: makerPda,
       })
       .transaction();
     let takerTx = await program.methods
       .createOrder({
         order: {
-          owner: takerKp.publicKey,
           matchTimestamp: null,
           orderType: { buy: {} },
           price: new anchor.BN(1),
@@ -283,6 +329,7 @@ describe("ephemeral-orderbook", () => {
       .accountsPartial({
         user: takerKp.publicKey,
         orderbook: orderbookPda,
+        trader: takerPda,
       })
       .signers([])
       .transaction();
@@ -305,18 +352,15 @@ describe("ephemeral-orderbook", () => {
       ).sendAndConfirm(tx, signers);
     }
 
-    const orderbookAccount = await ephemeralProgram.account.orderbook.fetch(
-      orderbookPda
-    );
-    assert.equal(orderbookAccount.orders.length, 2);
-    assert.equal(
-      orderbookAccount.orders[0].owner.toBase58(),
-      provider.wallet.publicKey.toBase58()
-    );
-    assert.equal(
-      orderbookAccount.orders[1].owner.toBase58(),
-      takerKp.publicKey.toBase58()
-    );
+    const makerAccount = await ephemeralProgram.account.trader.fetch(makerPda);
+    assert.equal(makerAccount.orders.length, 1);
+    assert.equal(makerAccount.baseBalance.toString(), "0");
+    assert.equal(makerAccount.quoteBalance.toString(), "0");
+
+    const takerAccount = await ephemeralProgram.account.trader.fetch(takerPda);
+    assert.equal(takerAccount.orders.length, 1);
+    assert.equal(takerAccount.baseBalance.toString(), "0");
+    assert.equal(takerAccount.quoteBalance.toString(), "0");
   });
 
   it("Match orders", async () => {
@@ -339,10 +383,12 @@ describe("ephemeral-orderbook", () => {
         maker: provider.wallet.publicKey,
         taker: takerKp.publicKey,
         makerIndex: new anchor.BN(0),
-        takerIndex: new anchor.BN(1),
+        takerIndex: new anchor.BN(0),
       })
       .accountsPartial({
         orderbook: orderbookPda,
+        maker: makerPda,
+        taker: takerPda,
       })
       .transaction();
     tx.feePayer = providerEphemeralRollup.wallet.publicKey;
@@ -353,39 +399,70 @@ describe("ephemeral-orderbook", () => {
 
     await providerEphemeralRollup.sendAndConfirm(tx);
 
-    const orderbookAccount = await ephemeralProgram.account.orderbook.fetch(
-      orderbookPda
-    );
-    assert.equal(orderbookAccount.orders.length, 0);
+    const makerAccount = await ephemeralProgram.account.trader.fetch(makerPda);
+    assert.equal(makerAccount.orders.length, 0);
+    assert.equal(makerAccount.baseBalance.toString(), "0");
+    assert.equal(makerAccount.quoteBalance.toString(), quantity.toString());
+
+    const takerAccount = await ephemeralProgram.account.trader.fetch(takerPda);
+    assert.equal(takerAccount.orders.length, 0);
+    assert.equal(takerAccount.baseBalance.toString(), quantity.toString());
+    assert.equal(takerAccount.quoteBalance.toString(), "0");
   });
 
-  it("Undelegate the orderbook and withdraw tokens", async () => {
-    let tx = await program.methods
-      .undelegateOrderbook()
+  it("Undelegate traders", async () => {
+    let makerTx = await program.methods
+      .undelegateTrader()
       .accountsPartial({
         payer: providerEphemeralRollup.wallet.publicKey,
-        orderbook: orderbookPda,
+        trader: makerPda,
       })
       .transaction();
-    tx.feePayer = provider.wallet.publicKey;
-    tx.recentBlockhash = (
+    makerTx.feePayer = provider.wallet.publicKey;
+    makerTx.recentBlockhash = (
       await providerEphemeralRollup.connection.getLatestBlockhash()
     ).blockhash;
-    tx = await providerEphemeralRollup.wallet.signTransaction(tx);
+    makerTx = await providerEphemeralRollup.wallet.signTransaction(makerTx);
+    const makerTxSign = await providerEphemeralRollup.sendAndConfirm(makerTx);
 
-    const txSign = await providerEphemeralRollup.sendAndConfirm(tx);
+    let takerTx = await program.methods
+      .undelegateTrader()
+      .accountsPartial({
+        payer: takerKp.publicKey,
+        trader: takerPda,
+      })
+      .transaction();
+    takerTx.feePayer = takerKp.publicKey;
+    takerTx.recentBlockhash = (
+      await providerEphemeralRollup.connection.getLatestBlockhash()
+    ).blockhash;
+    takerTx = await new anchor.Wallet(takerKp).signTransaction(takerTx);
+    const takerTxSign =
+      await providerEphemeralRollup.connection.sendRawTransaction(
+        takerTx.serialize()
+      );
+    await providerEphemeralRollup.connection.confirmTransaction(takerTxSign);
 
     // Await for the commitment on the base layer
-    await GetCommitmentSignature(txSign, providerEphemeralRollup.connection);
+    await Promise.all([
+      await GetCommitmentSignature(
+        makerTxSign,
+        providerEphemeralRollup.connection
+      ),
+      await GetCommitmentSignature(
+        takerTxSign,
+        providerEphemeralRollup.connection
+      ),
+    ]);
   });
 
   it("Withdraw tokens on the base layer", async () => {
-    console.log(await program.account.orderbook.fetch(orderbookPda));
     await program.methods
       .withdraw({ amount: quantity })
       .accountsPartial({
         user: provider.wallet.publicKey,
         orderbook: orderbookPda,
+        trader: makerPda,
         mint: quoteMint,
         userTokenAccount: makerQuoteAta,
         orderbookTokenAccount: orderbookQuoteAta,
@@ -399,6 +476,7 @@ describe("ephemeral-orderbook", () => {
       .accountsPartial({
         user: takerKp.publicKey,
         orderbook: orderbookPda,
+        trader: takerPda,
         mint: baseMint,
         userTokenAccount: takerBaseAta,
         orderbookTokenAccount: orderbookBaseAta,
@@ -408,5 +486,15 @@ describe("ephemeral-orderbook", () => {
       })
       .signers([takerKp])
       .rpc();
+
+    const makerAccount = await provider.connection.getTokenAccountBalance(
+      makerQuoteAta
+    );
+    assert.equal(makerAccount.value.amount.toString(), quantity.toString());
+
+    const takerAccount = await provider.connection.getTokenAccountBalance(
+      takerBaseAta
+    );
+    assert.equal(takerAccount.value.amount.toString(), quantity.toString());
   });
 });

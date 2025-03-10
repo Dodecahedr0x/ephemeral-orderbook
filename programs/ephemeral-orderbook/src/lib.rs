@@ -23,14 +23,9 @@ pub mod ephemeral_orderbook {
         InitializeOrderbook::handler(ctx, args)
     }
 
-    /// Create an order in the orderbook.
-    pub fn create_order(ctx: Context<CreateOrder>, args: CreateOrderArgs) -> Result<()> {
-        CreateOrder::handler(ctx, args)
-    }
-
     /// Create a user of the orderbook.
-    pub fn create_user(ctx: Context<CreateUser>) -> Result<()> {
-        CreateUser::handler(ctx)
+    pub fn create_trader(ctx: Context<CreateTrader>) -> Result<()> {
+        CreateTrader::handler(ctx)
     }
 
     /// Deposit tokens into the users balances.
@@ -45,22 +40,24 @@ pub mod ephemeral_orderbook {
         ChangeUserBalances::handler(ctx, false, args)
     }
 
+    /// Create an order in the orderbook.
+    pub fn create_order(ctx: Context<CreateOrder>, args: CreateOrderArgs) -> Result<()> {
+        CreateOrder::handler(ctx, args)
+    }
+
     /// Match a buy and a sell order.
     pub fn match_order(ctx: Context<MatchOrder>, args: MatchOrderArgs) -> Result<()> {
         MatchOrder::handler(ctx, args)
     }
 
     /// Delegate the account to the delegation program
-    pub fn delegate_orderbook(
-        ctx: Context<DelegateOrderbook>,
-        args: DelegateOrderbookArgs,
-    ) -> Result<()> {
-        DelegateOrderbook::handler(ctx, args)
+    pub fn delegate_trader(ctx: Context<DelegateTrader>, args: DelegateTraderArgs) -> Result<()> {
+        DelegateTrader::handler(ctx, args)
     }
 
     /// Undelegate the account from the delegation program
-    pub fn undelegate_orderbook(ctx: Context<UndelegateOrderbook>) -> Result<()> {
-        UndelegateOrderbook::handler(ctx)
+    pub fn undelegate_trader(ctx: Context<UndelegateTrader>) -> Result<()> {
+        UndelegateTrader::handler(ctx)
     }
 
     // /// Increment the counter + manual commit the account in the ER.

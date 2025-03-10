@@ -1,4 +1,8 @@
-use crate::{constants::ORDERBOOK_PDA_SEED, errors::OrderbookError, state::Orderbook};
+use crate::{
+    constants::{ORDERBOOK_PDA_SEED, TRADER_PDA_SEED},
+    errors::OrderbookError,
+    state::{Orderbook, Trader},
+};
 use anchor_lang::prelude::*;
 use anchor_spl::{
     associated_token::AssociatedToken,
@@ -15,11 +19,18 @@ pub struct ChangeUserBalances<'info> {
     #[account(mut)]
     pub user: Signer<'info>,
     #[account(
-        mut,
         seeds = [ORDERBOOK_PDA_SEED, orderbook.id.as_ref()],
         bump = orderbook.bump,
     )]
     pub orderbook: Box<Account<'info, Orderbook>>,
+    #[account(
+        mut,
+        seeds = [TRADER_PDA_SEED, orderbook.key().as_ref(), user.key().as_ref()],
+        bump = trader.bump,
+        has_one = orderbook,
+        has_one = user,
+    )]
+    pub trader: Box<Account<'info, Trader>>,
     pub mint: Box<Account<'info, Mint>>,
     #[account(
         init_if_needed,
@@ -58,20 +69,13 @@ impl<'info> ChangeUserBalances<'info> {
     ) -> Result<()> {
         let base_mint = ctx.accounts.orderbook.base_mint;
         let quote_mint = ctx.accounts.orderbook.quote_mint;
-        let user_balances = ctx
-            .accounts
-            .orderbook
-            .user_balances_mut(ctx.accounts.user.key);
-
-        let Some(user_balances) = user_balances else {
-            return err!(OrderbookError::UnknownUser);
-        };
+        let trader = &mut ctx.accounts.trader;
 
         if is_deposit {
             if ctx.accounts.mint.key() == base_mint {
-                user_balances.base_balance += args.amount;
+                trader.base_balance += args.amount;
             } else {
-                user_balances.quote_balance += args.amount;
+                trader.quote_balance += args.amount;
             }
 
             transfer_checked(
@@ -89,17 +93,17 @@ impl<'info> ChangeUserBalances<'info> {
             )?;
         } else {
             if ctx.accounts.mint.key() == base_mint {
-                if args.amount > user_balances.base_balance {
+                if args.amount > trader.base_balance {
                     return err!(OrderbookError::NotEnoughBaseTokens);
                 } else {
-                    user_balances.base_balance -= args.amount;
+                    trader.base_balance -= args.amount;
                 }
             }
             if ctx.accounts.mint.key() == quote_mint {
-                if args.amount > user_balances.quote_balance {
+                if args.amount > trader.quote_balance {
                     return err!(OrderbookError::NotEnoughBaseTokens);
                 } else {
-                    user_balances.quote_balance -= args.amount;
+                    trader.quote_balance -= args.amount;
                 }
             }
 
